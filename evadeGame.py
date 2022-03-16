@@ -1,6 +1,8 @@
 import copy
 import random as r
 from time import sleep
+from typing import Tuple
+
 import numpy as np
 from PIL import Image, ImageDraw
 import cv2
@@ -35,7 +37,7 @@ class Player:
     def setup(self, playingfield):
         self.movementGrid = [[self.getRandomValue() for j in range(len(playingfield[0]))] for i in
                              range(len(playingfield))]
-        print(self.movementGrid)
+        #print(self.movementGrid)
 
     def choose(self, gameState):
         dir = 0
@@ -60,7 +62,7 @@ class EvadeGame:
         cv2.waitKey(100)
         cv2.imshow("game", np.array(SimpleBlockRenderer.render(renderCopy, 100)))
 
-    def __init__(self, width, height, player, blockChance=0.1, blockChanceIncrease=0.005, render=False):
+    def __init__(self, width: int, height: int, player: Player, blockChance=0.1, blockChanceIncrease=0.005, render=False):
         self.width = width
         self.height = height
         self.playingField = [[0 for j in range(width)] for i in range(height)]
@@ -77,7 +79,7 @@ class EvadeGame:
         self.running = True
         while self.running:
             self.tick()
-        print(f"algorithm ran for {self.ticks} steps")
+        # print(f"algorithm ran for {self.ticks} steps")
         return self.ticks
 
     def getBlockBuffer(self):
@@ -98,7 +100,7 @@ class EvadeGame:
 
     def tick(self):
         result = self.player.choose(self.playingField)
-        if result == player.LEFT:
+        if result == Player.LEFT:
             self.moveLeft()
         else:
             self.moveRight()
@@ -121,8 +123,51 @@ class EvadeGame:
             self.playingField[y] = self.playingField[y][1:] + self.playingField[y][:1]
 
 
-player = Player()
+class GeneticAlgorithm:
+    def __init__(self, populationSize=10, stopFitness=100, crossOverChance=0.8, mutationChance=0.01, crossOverPercentage=0.5, amountOfGamesToDecideAverage=20):
+        self.populationSize = populationSize
+        self.stopFitness = stopFitness
+        self.crossOverChance = crossOverChance
+        self.mutationChance = mutationChance
+        self.amountOfGamesToDecideAverage = amountOfGamesToDecideAverage
+        self.population = [(Player(), 0.0) for _ in range(populationSize)]
+        self.crossOverPercentage = crossOverPercentage
 
-while True:
-    game = EvadeGame(11, 8, player, render=False)
-    game.run()
+    def crossOverPlayers(self, parentA: Player, parentB: Player) -> Tuple[Player, Player]:
+        childA, childB = copy.deepcopy(parentA), copy.deepcopy(parentB)
+        for y in range(parentA.movementGrid):
+            for x in range(parentA.movementGrid[0]):
+                if r.random() < self.crossOverPercentage:
+                    childA.movementGrid[y][x] = parentB.movementGrid[y][x]
+                    childB.movementGrid[y][x] = parentA.movementGrid[y][x]
+        return childA, childB
+
+    def determineFitness(self, player: Player) -> float:
+        results = []
+        for i in range(self.amountOfGamesToDecideAverage):
+            result = EvadeGame(11, 8, player, render=False).run()
+            results.append(result)
+        return sum(results)/len(results)
+
+    def getAverageFitness(self) -> float:
+        return sum([player[1] for player in self.population])/len(self.population)
+
+    def tick(self):
+        self.population = [(player[0], self.determineFitness(player[0])) for player in self.population]
+        print(f"Average fitness of population = {self.getAverageFitness()}")
+
+    def run(self):
+        while self.getAverageFitness() < self.stopFitness:
+            self.tick()
+
+
+geneticAlgorithm = GeneticAlgorithm()
+geneticAlgorithm.run()
+
+
+
+#player = Player()
+
+# while True:
+#     game = EvadeGame(11, 8, player, render=True)
+#     game.run()
