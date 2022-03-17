@@ -1,6 +1,7 @@
 import copy
 import random
 import random as r
+import threading
 from time import sleep
 from typing import Tuple
 
@@ -9,21 +10,8 @@ from PIL import Image, ImageDraw
 import cv2
 
 
-class SimpleBlockRenderer:
 
-    @staticmethod
-    def render(cells, cellSize):
 
-        crd = lambda x, y: (x * cellSize, y * cellSize)
-
-        img = Image.new("RGB", (len(cells[0]) * cellSize, len(cells) * cellSize), color="white")
-        d = ImageDraw.Draw(img)
-
-        for y, row in enumerate(cells):
-            for x, cell in enumerate(row):
-                d.rectangle([crd(x, y), crd(x + 1, y + 1)], fill=cells[y][x])
-
-        return img
 
 
 class Player:
@@ -39,6 +27,7 @@ class Player:
         self.fitnessLog = []
         self.age = 0
         self.isSetup = False
+        self.conviction = r.random() * 5
 
     def reset(self):
         self.getNewID()
@@ -60,12 +49,18 @@ class Player:
             for x in range(len(gameState[0])):
                 if gameState[y][x] == 1:
                     dir += self.movementGrid[y][x]
-        if dir < 0:
+
+        if dir < self.conviction * -1:
             return Player.LEFT
-        else:
+        elif dir > self.conviction:
             return Player.RIGHT
+        else:
+            return Player.STAY
 
     def mutate(self, chance):
+        if r.random() < chance:
+            self.conviction = r.random() * 5
+
         for y in range(len(self.movementGrid)):
             for x in range(len(self.movementGrid[0])):
                 if r.random() < chance:
@@ -90,8 +85,46 @@ class Player:
 
 
     def __repr__(self):
-        return f"Player(ID: {self.ID}, Mutations: {self.mutationCount}, fitnessVariance: {'{:.3f}'.format(self.getFitnessVariance())}, age: {self.age} )"
+        return f"Player(ID: {self.ID}, Mutations: {self.mutationCount}, fitnessVariance: {'{:.3f}'.format(self.getFitnessVariance())}, age: {self.age}, conviction: {self.conviction})"
 
+
+class SimpleBlockRenderer:
+
+    newPlayer = None
+    looping = False
+    rendering = False
+
+    @staticmethod
+    def render(cells, cellSize):
+
+        crd = lambda x, y: (x * cellSize, y * cellSize)
+
+        img = Image.new("RGB", (len(cells[0]) * cellSize, len(cells) * cellSize), color="white")
+        d = ImageDraw.Draw(img)
+
+        for y, row in enumerate(cells):
+            for x, cell in enumerate(row):
+                d.rectangle([crd(x, y), crd(x + 1, y + 1)], fill=cells[y][x])
+
+        return img
+
+    @staticmethod
+    def renderGame():
+        while True:
+            if SimpleBlockRenderer.newPlayer is not None and not SimpleBlockRenderer.rendering:
+                SimpleBlockRenderer.rendering = True
+                player = copy.deepcopy(SimpleBlockRenderer.newPlayer[0])
+                title = "game at fitness: " + str(player.fitnessLog[-1])
+                result = EvadeGame(11, 8, player, render=True, title=title).run()
+                cv2.destroyWindow(title)
+                SimpleBlockRenderer.rendering = False
+
+    @staticmethod
+    def startRenderLoop():
+        if not SimpleBlockRenderer.looping:
+            SimpleBlockRenderer.looping = True
+            t = threading.Thread(target=SimpleBlockRenderer.renderGame)
+            t.start()
 
 
 class EvadeGame:
@@ -102,10 +135,10 @@ class EvadeGame:
             for x in range(len(renderCopy[0])):
                 renderCopy[y][x] = 'black' if renderCopy[y][x] == 1 else 'white'
         renderCopy[len(renderCopy) - 1][int(len(renderCopy[0]) / 2)] = 'red'
-        cv2.waitKey(100)
-        cv2.imshow("game", np.array(SimpleBlockRenderer.render(renderCopy, 100)))
+        cv2.waitKey(30)
+        cv2.imshow(self.title, np.array(SimpleBlockRenderer.render(renderCopy, 50)))
 
-    def __init__(self, width: int, height: int, player: Player, blockChance=0.1, blockChanceIncrease=0.005, render=False):
+    def __init__(self, width: int, height: int, player: Player, blockChance=0.1, blockChanceIncrease=0.0, render=False, title="simulation"):
         self.width = width
         self.height = height
         self.playingField = [[0 for j in range(width)] for i in range(height)]
@@ -117,6 +150,9 @@ class EvadeGame:
         self.ticks = 0
         self.playerCoordinate = {"x": int(width / 2), "y": height - 1}
         self.shouldRender = render
+        self.title = title
+
+        SimpleBlockRenderer.startRenderLoop()
 
 
     def run(self):
@@ -146,7 +182,7 @@ class EvadeGame:
         result = self.player.choose(self.playingField)
         if result == Player.LEFT:
             self.moveLeft()
-        else:
+        elif result == Player.RIGHT:
             self.moveRight()
 
         self.yTick()
@@ -180,8 +216,6 @@ class GeneticAlgorithm:
         for _ in range(populationSize):
             p = Player()
             self.population.append((p, self.determineFitness(p)))
-
-
         self.crossOverPercentage = crossOverPercentage
 
     def crossOverPlayers(self, parentA: Player, parentB: Player) -> Tuple[Player, Player]:
@@ -242,6 +276,8 @@ class GeneticAlgorithm:
 
         fittedPopulation = [(player, self.determineFitness(player)) for player in newPopulation]
 
+        SimpleBlockRenderer.newPlayer = fittedPopulation[0]
+
         print("newFittedPopulation")
         self.printSortedPopulation(fittedPopulation)
 
@@ -258,7 +294,7 @@ class GeneticAlgorithm:
             self.tick()
 
 
-geneticAlgorithm = GeneticAlgorithm(populationSize=10, elitism=2, mutationChance=0.005, crossOverChance=0.8, amountOfGamesToDecideAverage=100, topXIndividualsConsidered=6)
+geneticAlgorithm = GeneticAlgorithm(stopFitness=1000, populationSize=20, elitism=2, mutationChance=0.02, crossOverChance=0.8, amountOfGamesToDecideAverage=1000, topXIndividualsConsidered=6)
 geneticAlgorithm.run()
 
 
